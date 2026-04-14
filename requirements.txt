@@ -1,0 +1,30 @@
+# Geoespacial
+geopandas==1.0.1
+rasterio==1.4.3
+shapely==2.0.6
+folium==0.19.5
+leafmap==0.44.2
+earthengine-api==1.5.8
+pyproj==3.7.1
+
+# Dados e análise
+pandas==2.2.3
+numpy==2.2.4
+matplotlib==3.10.1
+seaborn==0.13.2
+
+# Machine Learning
+scikit-learn==1.6.1
+xgboost==2.1.4
+
+# Séries temporais
+prophet==1.1.6
+
+# Dashboard
+streamlit==1.43.2
+
+# Utilitários
+requests==2.32.3
+python-dotenv==1.1.0
+tqdm==4.67.1
+jupyter==1.1.1

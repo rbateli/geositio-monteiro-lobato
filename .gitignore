@@ -1,0 +1,60 @@
+# Dados pesados (rasters, shapefiles grandes)
+data/raw/
+data/processed/
+
+# Artefatos HTML gerados (14 MB+, regenerados por gerar_*.py)
+data/sitio.html
+data/relatorio_final.html
+data/relatorio_geositio.html
+data/mapa_ndvi.html
+data/mapa_relevo.html
+data/mapa_sitio.html
+
+*.tif
+*.tiff
+*.img
+*.hdf
+*.nc
+*.shp
+*.shx
+*.dbf
+*.prj
+*.cpg
+*.sbn
+*.sbx
+
+# Manter apenas amostras leves em data/
+!data/samples/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+.venv/
+venv/
+env/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Credenciais e chaves
+.env
+*.json
+!package.json
+credentials/
+token.pickle
+
+# Earth Engine
+.config/earthengine/

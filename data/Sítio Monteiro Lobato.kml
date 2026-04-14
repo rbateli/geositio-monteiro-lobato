@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2" xmlns:gx="http://www.google.com/kml/ext/2.2" xmlns:kml="http://www.opengis.net/kml/2.2" xmlns:atom="http://www.w3.org/2005/Atom">
+<Document id="document">
+	<name>Mapa sem título</name>
+	<gx:CascadingStyle kml:id="__managed_style_540C9D19623EA93C5FB0">
+		<Style>
+			<IconStyle>
+				<scale>1.2</scale>
+				<Icon>
+					<href>https://earth.google.com/earth/document/icon?color=1976d2&amp;id=2000&amp;scale=4</href>
+				</Icon>
+				<hotSpot x="64" y="128" xunits="pixels" yunits="insetPixels"/>
+			</IconStyle>
+			<LabelStyle>
+			</LabelStyle>
+			<LineStyle>
+				<color>ff2dc0fb</color>
+				<width>6</width>
+			</LineStyle>
+			<PolyStyle>
+				<color>40ffffff</color>
+			</PolyStyle>
+			<BalloonStyle>
+				<displayMode>hide</displayMode>
+			</BalloonStyle>
+		</Style>
+	</gx:CascadingStyle>
+	<gx:CascadingStyle kml:id="__managed_style_4D74B8AFB73EA93C5FB0">
+		<Style>
+			<IconStyle>
+				<Icon>
+					<href>https://earth.google.com/earth/document/icon?color=1976d2&amp;id=2000&amp;scale=4</href>
+				</Icon>
+				<hotSpot x="64" y="128" xunits="pixels" yunits="insetPixels"/>
+			</IconStyle>
+			<LabelStyle>
+			</LabelStyle>
+			<LineStyle>
+				<color>ff2dc0fb</color>
+				<width>4</width>
+			</LineStyle>
+			<PolyStyle>
+				<color>40ffffff</color>
+			</PolyStyle>
+			<BalloonStyle>
+				<displayMode>hide</displayMode>
+			</BalloonStyle>
+		</Style>
+	</gx:CascadingStyle>
+	<StyleMap id="__managed_style_30D39BAFF13EA93C5FB0">
+		<Pair>
+			<key>normal</key>
+			<styleUrl>#__managed_style_4D74B8AFB73EA93C5FB0</styleUrl>
+		</Pair>
+		<Pair>
+			<key>highlight</key>
+			<styleUrl>#__managed_style_540C9D19623EA93C5FB0</styleUrl>
+		</Pair>
+	</StyleMap>
+	<Placemark id="064AF2AC093EA93C5FA6">
+		<name>Sitio Monteiro Lobato</name>
+		<LookAt>
+			<longitude>-45.8387299297835</longitude>
+			<latitude>-22.9143531929726</latitude>
+			<altitude>690.2730137750531</altitude>
+			<heading>355.8917910441592</heading>
+			<tilt>0</tilt>
+			<gx:fovy>35</gx:fovy>
+			<range>746.6203790178406</range>
+			<altitudeMode>absolute</altitudeMode>
+		</LookAt>
+		<styleUrl>#__managed_style_30D39BAFF13EA93C5FB0</styleUrl>
+		<Polygon>
+			<outerBoundaryIs>
+				<LinearRing>
+					<coordinates>
+						-45.83997899599811,-22.91410917859986,0 -45.83932076987124,-22.9150088523217,0 -45.83762641981043,-22.91402409955142,0 -45.83680073145568,-22.91354069466095,0 -45.83687022262954,-22.91340712633824,0 -45.83653650006772,-22.91323859670903,0 -45.83678237837862,-22.91278263545145,0 -45.83997899599811,-22.91410917859986,0 
+					</coordinates>
+				</LinearRing>
+			</outerBoundaryIs>
+		</Polygon>
+	</Placemark>
+</Document>
+</kml>
