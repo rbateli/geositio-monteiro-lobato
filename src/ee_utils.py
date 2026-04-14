@@ -339,6 +339,110 @@ def gerar_url_tile_classes_declividade(classes: ee.Image) -> str:
     return map_id["tile_fetcher"].url_format
 
 
+def classificar_aspecto_cardinal(aspecto: ee.Image) -> ee.Image:
+    """Classifica aspecto em 8 direções cardinais + plano.
+
+    Classes: 1=N 2=NE 3=E 4=SE 5=S 6=SW 7=W 8=NW
+    Aspecto em graus (0–360, 0 = Norte).
+    """
+    a = aspecto.select("aspecto")
+    return (
+        a
+        .where(a.gte(337.5).Or(a.lt(22.5)), 1)   # N
+        .where(a.gte(22.5).And(a.lt(67.5)), 2)   # NE
+        .where(a.gte(67.5).And(a.lt(112.5)), 3)  # E
+        .where(a.gte(112.5).And(a.lt(157.5)), 4) # SE
+        .where(a.gte(157.5).And(a.lt(202.5)), 5) # S
+        .where(a.gte(202.5).And(a.lt(247.5)), 6) # SW
+        .where(a.gte(247.5).And(a.lt(292.5)), 7) # W
+        .where(a.gte(292.5).And(a.lt(337.5)), 8) # NW
+        .rename("aspect_class")
+    )
+
+
+def calcular_percentual_aspecto(aspect_classes: ee.Image, geometria: ee.Geometry) -> dict:
+    """Retorna percentual de área em cada face cardinal."""
+    hist = aspect_classes.reduceRegion(
+        reducer=ee.Reducer.frequencyHistogram(),
+        geometry=geometria, scale=30, maxPixels=1e9,
+    ).get("aspect_class").getInfo() or {}
+    nomes = {"1": "N", "2": "NE", "3": "E", "4": "SE",
+             "5": "S", "6": "SW", "7": "W", "8": "NW"}
+    total = sum(hist.values()) or 1
+    return {nomes.get(str(int(float(k))), k): round((v/total)*100, 1)
+            for k, v in hist.items()}
+
+
+def calcular_risco_erosao(composto: ee.Image, elevacao: ee.Image, geometria: ee.Geometry) -> ee.Image:
+    """Calcula índice de risco de erosão combinando declividade e solo exposto.
+
+    Risco = 0.6 * slope_score + 0.4 * bsi_score
+    - slope_score: declividade normalizada (0° = 0 ; 45° = 1)
+    - bsi_score: BSI normalizado (−0.1 = 0 ; 0.2 = 1)
+    Resultado classificado em 3 níveis:
+      1 = Baixo (< 0.35)
+      2 = Médio (0.35–0.55)
+      3 = Alto (> 0.55)
+    """
+    slope = ee.Terrain.slope(elevacao).rename("slope_tmp")
+    bsi = composto.select("BSI")
+    slope_score = slope.divide(45).clamp(0, 1)
+    bsi_score = bsi.subtract(-0.1).divide(0.3).clamp(0, 1)
+    risco_cont = slope_score.multiply(0.6).add(bsi_score.multiply(0.4)).rename("risco_cont")
+    risco_classe = (
+        risco_cont
+        .where(risco_cont.lt(0.35), 1)
+        .where(risco_cont.gte(0.35).And(risco_cont.lt(0.55)), 2)
+        .where(risco_cont.gte(0.55), 3)
+        .rename("risco_erosao")
+    )
+    return risco_classe.clip(geometria)
+
+
+def calcular_percentual_risco_erosao(risco: ee.Image, geometria: ee.Geometry) -> dict:
+    """Retorna percentual de área em cada classe de risco de erosão."""
+    hist = risco.reduceRegion(
+        reducer=ee.Reducer.frequencyHistogram(),
+        geometry=geometria, scale=30, maxPixels=1e9,
+    ).get("risco_erosao").getInfo() or {}
+    nomes = {"1": "baixo", "2": "medio", "3": "alto"}
+    total = sum(hist.values()) or 1
+    out = {"baixo": 0.0, "medio": 0.0, "alto": 0.0}
+    for k, v in hist.items():
+        key = nomes.get(str(int(float(k))))
+        if key:
+            out[key] = round((v/total)*100, 1)
+    return out
+
+
+def gerar_url_tile_risco_erosao(risco: ee.Image) -> str:
+    """Gera URL de tile do mapa de risco de erosão (3 classes)."""
+    vis_params = {
+        "bands": ["risco_erosao"],
+        "min": 1, "max": 3,
+        "palette": ["#1a9850", "#fee08b", "#d73027"],  # verde / amarelo / vermelho
+    }
+    map_id = risco.getMapId(vis_params)
+    return map_id["tile_fetcher"].url_format
+
+
+def obter_estatisticas_aspecto(aspecto: ee.Image, geometria: ee.Geometry) -> dict:
+    """Média vetorial circular do aspecto (evita média errada em 0°/360°)."""
+    import math
+    a_rad = aspecto.select("aspecto").multiply(math.pi / 180)
+    sin_mean = a_rad.sin().reduceRegion(
+        reducer=ee.Reducer.mean(), geometry=geometria, scale=30, maxPixels=1e9
+    ).get("aspecto").getInfo() or 0
+    cos_mean = a_rad.cos().reduceRegion(
+        reducer=ee.Reducer.mean(), geometry=geometria, scale=30, maxPixels=1e9
+    ).get("aspecto").getInfo() or 0
+    mean_rad = math.atan2(sin_mean, cos_mean)
+    mean_deg = (math.degrees(mean_rad) + 360) % 360
+    # Concentração (1 = tudo na mesma direção, 0 = disperso)
+    r = math.sqrt(sin_mean**2 + cos_mean**2)
+    return {"media_graus": mean_deg, "concentracao": r}
+
+
 # ============================================================
 # Classificação de Uso do Solo
 # ============================================================
@@ -487,3 +591,148 @@ def gerar_url_tile_ndwi(ndwi: ee.Image) -> str:
     }
     map_id = ndwi.getMapId(vis_params)
     return map_id["tile_fetcher"].url_format
+
+
+def obter_estatisticas_twi(twi: ee.Image, geometria: ee.Geometry) -> dict:
+    """Estatísticas do TWI: média, min, max, percentual de pixels por faixa."""
+    stats = twi.reduceRegion(
+        reducer=ee.Reducer.mean().combine(ee.Reducer.minMax(), sharedInputs=True)
+                                   .combine(ee.Reducer.stdDev(), sharedInputs=True),
+        geometry=geometria, scale=30, maxPixels=1e9,
+    ).getInfo()
+    return {
+        "media": stats.get("TWI_mean", 0) or 0,
+        "minimo": stats.get("TWI_min", 0) or 0,
+        "maximo": stats.get("TWI_max", 0) or 0,
+        "desvio": stats.get("TWI_stdDev", 0) or 0,
+    }
+
+
+def obter_ponto_twi_maximo(twi: ee.Image, geometria: ee.Geometry) -> dict:
+    """Retorna lat/lon do pixel de TWI máximo (melhor candidato a tanque/nascente)."""
+    # Anexa coordenadas como bandas
+    coords = ee.Image.pixelLonLat()
+    stack = twi.addBands(coords)
+    max_info = stack.reduceRegion(
+        reducer=ee.Reducer.max(numInputs=3),
+        geometry=geometria, scale=30, maxPixels=1e9,
+        bestEffort=True,
+    ).getInfo()
+    # Resultado: {'max': twi_val, 'max1': lon, 'max2': lat}
+    return {
+        "twi": max_info.get("max"),
+        "lon": max_info.get("max1"),
+        "lat": max_info.get("max2"),
+    }
+
+
+def obter_percentuais_twi(twi: ee.Image, geometria: ee.Geometry) -> dict:
+    """Percentual de área em 3 faixas: seca, moderada, úmida."""
+    # Classifica em 3 faixas: < 0.5 seco, 0.5-2 moderado, > 2 úmido
+    seco = twi.lt(0.5).rename("seco")
+    moderado = twi.gte(0.5).And(twi.lt(2)).rename("moderado")
+    umido = twi.gte(2).rename("umido")
+    stack = seco.addBands(moderado).addBands(umido)
+    stats = stack.reduceRegion(
+        reducer=ee.Reducer.mean(),
+        geometry=geometria, scale=30, maxPixels=1e9,
+    ).getInfo()
+    return {
+        "seco": (stats.get("seco", 0) or 0) * 100,
+        "moderado": (stats.get("moderado", 0) or 0) * 100,
+        "umido": (stats.get("umido", 0) or 0) * 100,
+    }
+
+
+def obter_estatisticas_ndwi(ndwi: ee.Image, geometria: ee.Geometry) -> dict:
+    """Estatísticas do NDWI e percentual de pixels com água (> 0)."""
+    stats = ndwi.reduceRegion(
+        reducer=ee.Reducer.mean().combine(ee.Reducer.minMax(), sharedInputs=True),
+        geometry=geometria, scale=10, maxPixels=1e9,
+    ).getInfo()
+    # % pixels com NDWI > 0 (água efetiva)
+    agua = ndwi.gt(0).rename("agua")
+    pct_agua = agua.reduceRegion(
+        reducer=ee.Reducer.mean(),
+        geometry=geometria, scale=10, maxPixels=1e9,
+    ).getInfo()
+    # Total de pixels amostrados
+    total = ndwi.reduceRegion(
+        reducer=ee.Reducer.count(), geometry=geometria, scale=10, maxPixels=1e9,
+    ).getInfo()
+    return {
+        "media": stats.get("NDWI_agua_mean", 0) or 0,
+        "minimo": stats.get("NDWI_agua_min", 0) or 0,
+        "maximo": stats.get("NDWI_agua_max", 0) or 0,
+        "pct_agua": (pct_agua.get("agua", 0) or 0) * 100,
+        "n_pixels": total.get("NDWI_agua", 0) or 0,
+    }
+
+
+# ============================================================
+# Clima histórico (CHIRPS + ERA5)
+# ============================================================
+
+def extrair_serie_chuva_mensal(geometria: ee.Geometry, ano_inicio: int = 2015, ano_fim: int = 2024) -> "pd.DataFrame":
+    """Série mensal de precipitação usando CHIRPS (0,05° ≈ 5 km).
+
+    Geometrias menores que o pixel CHIRPS (~5 km) retornam NaN em reduceRegion
+    com a própria geometria; usamos o centróide para amostrar o pixel central.
+    """
+    import pandas as pd
+    ponto = geometria.centroid(1)
+    chirps = (
+        ee.ImageCollection("UCSB-CHG/CHIRPS/DAILY")
+        .filterDate(f"{ano_inicio}-01-01", f"{ano_fim+1}-01-01")
+        .filterBounds(geometria)
+        .select("precipitation")
+    )
+    registros = []
+    for mes in range(1, 13):
+        filtrada = chirps.filter(ee.Filter.calendarRange(mes, mes, "month"))
+        # Total mensal médio: dias * média diária
+        val = filtrada.mean().multiply(30).reduceRegion(
+            reducer=ee.Reducer.mean(), geometry=ponto, scale=5566, maxPixels=1e9
+        ).get("precipitation").getInfo() or 0
+        registros.append({"mes": mes, "precipitacao_mm": val})
+    return pd.DataFrame(registros)
+
+
+def extrair_serie_temperatura_mensal(geometria: ee.Geometry, ano_inicio: int = 2015, ano_fim: int = 2024) -> "pd.DataFrame":
+    """Série mensal de temperatura (média, min, max) a partir do ERA5-Land diário.
+
+    Para cada mês (1..12), agrega em toda a janela ano_inicio..ano_fim:
+      - temp_media_c: média das médias diárias
+      - temp_min_c:   mínima observada (mínima diária mínima)
+      - temp_max_c:   máxima observada (máxima diária máxima)
+    Temperaturas vêm em Kelvin no ERA5 → convertemos para °C.
+    """
+    import pandas as pd
+    # Geometria do sítio é menor que o pixel ERA5 (~11 km) -> amostrar no centróide
+    ponto = geometria.centroid(1)
+    era5 = (
+        ee.ImageCollection("ECMWF/ERA5_LAND/DAILY_AGGR")
+        .filterDate(f"{ano_inicio}-01-01", f"{ano_fim+1}-01-01")
+        .filterBounds(geometria)
+        .select(["temperature_2m", "temperature_2m_min", "temperature_2m_max"])
+    )
+    registros = []
+    for mes in range(1, 13):
+        filtrada = era5.filter(ee.Filter.calendarRange(mes, mes, "month"))
+        media_img = filtrada.select("temperature_2m").mean()
+        min_img = filtrada.select("temperature_2m_min").min()
+        max_img = filtrada.select("temperature_2m_max").max()
+        stack = media_img.rename("t_mean").addBands(min_img.rename("t_min")).addBands(max_img.rename("t_max"))
+        vals = stack.reduceRegion(
+            reducer=ee.Reducer.mean(), geometry=ponto, scale=11132, maxPixels=1e9
+        ).getInfo() or {}
+        def _c(k):
+            v = vals.get(k)
+            return v - 273.15 if v is not None else None
+        registros.append({
+            "mes": mes,
+            "temp_media_c": _c("t_mean"),
+            "temp_min_c": _c("t_min"),
+            "temp_max_c": _c("t_max"),
+        })
+    return pd.DataFrame(registros)

@@ -18,7 +18,7 @@ from src.ee_utils import *
 # ============================================================
 # DADOS
 # ============================================================
-print("[1/5] Earth Engine...")
+print("[1/9] Earth Engine...")
 inicializar_ee()
 geometria = carregar_geometria_sitio()
 gdf = carregar_sitio()
@@ -26,7 +26,7 @@ gdf_utm = reprojetar(gdf)
 area_m2 = gdf_utm.area.values[0]
 perimetro_m = gdf_utm.length.values[0]
 
-print("[2/5] Sentinel-2 + NDVI...")
+print("[2/9] Sentinel-2 + NDVI...")
 colecao = coletar_sentinel2(geometria, "2025-04-01", "2026-04-01", max_nuvens=20)
 qtd = colecao.size().getInfo()
 composto = composto_mediana(colecao, geometria)
@@ -34,18 +34,63 @@ sn = obter_estatisticas_ndvi(composto, geometria)
 url_rgb = gerar_url_tile_rgb(composto)
 url_ndvi = gerar_url_tile_ndvi(composto)
 
-print("[3/5] Serie temporal...")
+print("[3/9] Serie temporal...")
 df = extrair_serie_temporal_ndvi(geometria, "2023-04-01", "2026-04-09", max_nuvens=30)
 
-print("[4/5] Relevo...")
+print("[4/9] Relevo...")
 elev = carregar_elevacao(geometria)
 se = obter_estatisticas_elevacao(elev, geometria)
 sd = obter_estatisticas_declividade(calcular_declividade(elev), geometria)
 
-print("[5/5] Classificacao...")
+print("[5/9] Classificacao...")
 cls = classificar_uso_solo(colecao, geometria, n_classes=5)
 pu = calcular_percentual_uso_solo(cls, geometria)
 url_uso = gerar_url_tile_uso_solo(cls)
+
+print("[6/9] Relevo 3D (hillshade + aspecto + EMBRAPA)...")
+slope_img = calcular_declividade(elev)
+classes_decliv = classificar_declividade(slope_img)
+pct_embrapa = calcular_percentual_classes_declividade(classes_decliv, geometria)
+url_classes = gerar_url_tile_classes_declividade(classes_decliv)
+
+hillshade_img = calcular_hillshade(elev)
+url_hillshade = gerar_url_tile_hillshade(hillshade_img)
+
+aspect_img = calcular_aspecto(elev)
+aspect_classes = classificar_aspecto_cardinal(aspect_img)
+pct_aspecto = calcular_percentual_aspecto(aspect_classes, geometria)
+aspect_stats = obter_estatisticas_aspecto(aspect_img, geometria)
+
+print("[7/9] Risco de erosao (BSI + slope)...")
+risco_img = calcular_risco_erosao(composto, elev, geometria)
+pct_risco = calcular_percentual_risco_erosao(risco_img, geometria)
+url_risco = gerar_url_tile_risco_erosao(risco_img)
+
+print("[8/10] Agua (TWI + NDWI)...")
+twi = calcular_twi(elev, geometria)
+twi_stats = obter_estatisticas_twi(twi, geometria)
+twi_pct = obter_percentuais_twi(twi, geometria)
+twi_ponto = obter_ponto_twi_maximo(twi, geometria)
+url_twi = gerar_url_tile_twi(twi)
+
+ndwi_img = calcular_ndwi_agua(colecao, geometria)
+ndwi_stats = obter_estatisticas_ndwi(ndwi_img, geometria)
+url_ndwi = gerar_url_tile_ndwi(ndwi_img)
+
+print("[9/10] Clima historico (CHIRPS + ERA5)...")
+df_chuva = extrair_serie_chuva_mensal(geometria, ano_inicio=2015, ano_fim=2024)
+df_temp = extrair_serie_temperatura_mensal(geometria, ano_inicio=2015, ano_fim=2024)
+df_clima = df_chuva.merge(df_temp, on="mes")
+_mn = {1:"Jan",2:"Fev",3:"Mar",4:"Abr",5:"Mai",6:"Jun",7:"Jul",8:"Ago",9:"Set",10:"Out",11:"Nov",12:"Dez"}
+df_clima["nome"] = df_clima["mes"].map(_mn)
+chuva_total_anual = df_clima["precipitacao_mm"].sum()
+temp_min_geral = df_clima["temp_min_c"].min()
+temp_max_geral = df_clima["temp_max_c"].max()
+temp_media_anual = df_clima["temp_media_c"].mean()
+mes_mais_frio = df_clima.loc[df_clima["temp_min_c"].idxmin(), "nome"]
+mes_mais_chuvoso = df_clima.loc[df_clima["precipitacao_mm"].idxmax(), "nome"]
+mes_mais_seco_clima = df_clima.loc[df_clima["precipitacao_mm"].idxmin(), "nome"]
+risco_geada = temp_min_geral < 5.0
 
 # Calculos
 ndvi_m = sn["media"]
@@ -173,6 +218,162 @@ fig3.update_layout(
 chart_uso = pio.to_html(fig3, full_html=False, config=plotly_config)
 
 # ============================================================
+# GRAFICO: Classes EMBRAPA — barra horizontal empilhada
+# ============================================================
+ordem_embrapa = [
+    ("Plano (0-3°)", "#1a9850"),
+    ("Suave ondulado (3-8°)", "#a6d96a"),
+    ("Ondulado (8-20°)", "#fee08b"),
+    ("Forte ondulado (20-45°)", "#f46d43"),
+    ("Montanhoso (>45°)", "#d73027"),
+]
+labels_emb = [n for n, _ in ordem_embrapa]
+vals_emb = [pct_embrapa.get(n, 0) for n, _ in ordem_embrapa]
+cores_emb = [c for _, c in ordem_embrapa]
+
+fig_emb = go.Figure()
+for nome, val, cor in zip(labels_emb, vals_emb, cores_emb):
+    fig_emb.add_trace(go.Bar(
+        y=["EMBRAPA"], x=[val], orientation="h",
+        name=nome.split(" (")[0],
+        marker=dict(color=cor, line=dict(width=0)),
+        text=f"{val:.0f}%" if val >= 4 else "",
+        textposition="inside", insidetextanchor="middle",
+        textfont=dict(color=DS["ink"], size=12, family=FONT_MONO),
+        hovertemplate=f"<b>{nome}</b><br>%{{x:.1f}}%<extra></extra>",
+    ))
+fig_emb.update_layout(
+    barmode="stack", height=110,
+    font=dict(family=FONT_SANS, color=DS["ink_2"], size=11),
+    paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+    margin=dict(t=10, b=10, l=10, r=10),
+    xaxis=dict(visible=False, range=[0, 100]),
+    yaxis=dict(visible=False),
+    showlegend=False,
+    hoverlabel=dict(bgcolor=DS["ink"], bordercolor=DS["ink"],
+                    font=dict(family=FONT_MONO, color="#fff", size=11)),
+)
+chart_embrapa = pio.to_html(fig_emb, full_html=False, config=plotly_config)
+
+# ============================================================
+# GRAFICO: Rosa dos ventos (orientação das encostas)
+# ============================================================
+direcoes = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
+vals_aspect = [pct_aspecto.get(d, 0) for d in direcoes]
+max_val = max(vals_aspect) if vals_aspect else 0
+cores_aspect = [DS["accent"] if v == max_val and v > 0 else "#D4D4D8" for v in vals_aspect]
+
+fig_rosa = go.Figure()
+fig_rosa.add_trace(go.Barpolar(
+    r=vals_aspect, theta=direcoes,
+    marker=dict(color=cores_aspect, line=dict(color=DS["surface"], width=2)),
+    hovertemplate="<b>Face %{theta}</b><br>%{r:.1f}%<extra></extra>",
+    width=[45]*8,
+))
+fig_rosa.update_layout(
+    height=340,
+    font=dict(family=FONT_SANS, color=DS["ink_2"], size=11),
+    paper_bgcolor="rgba(0,0,0,0)",
+    margin=dict(t=20, b=20, l=20, r=20),
+    polar=dict(
+        bgcolor="rgba(0,0,0,0)",
+        radialaxis=dict(visible=False, range=[0, max(max_val*1.15, 10)]),
+        angularaxis=dict(
+            direction="clockwise", rotation=90,
+            tickfont=dict(size=12, color=DS["ink"], family=FONT_MONO),
+            gridcolor=DS["border"],
+        ),
+    ),
+    hoverlabel=dict(bgcolor=DS["ink"], bordercolor=DS["ink"],
+                    font=dict(family=FONT_MONO, color="#fff", size=11)),
+)
+chart_rosa = pio.to_html(fig_rosa, full_html=False, config=plotly_config)
+
+face_predominante = max(pct_aspecto, key=pct_aspecto.get) if pct_aspecto else "N"
+FACE_INFO = {
+    "N":  ("Norte",    "mais sol o dia todo (hemisfério sul) — ideal para frutas"),
+    "NE": ("Nordeste", "sol forte pela manhã — bom para hortaliças"),
+    "E":  ("Leste",    "sol da manhã — ameno, bom para pomar"),
+    "SE": ("Sudeste",  "sol suave — bom para culturas sensíveis ao calor"),
+    "S":  ("Sul",      "menos sol e mais umidade — ideal para preservação"),
+    "SW": ("Sudoeste", "pouco sol, retém umidade — favorece mata"),
+    "W":  ("Oeste",    "sol forte no fim da tarde — seca rápido"),
+    "NW": ("Noroeste", "sol forte à tarde — bom para pastagem"),
+}
+face_nome, face_implicacao = FACE_INFO.get(face_predominante, (face_predominante, ""))
+
+# ============================================================
+# GRAFICO: Clima histórico — chuva (barras) + temperatura (linhas)
+# ============================================================
+from plotly.subplots import make_subplots
+fig_clima = make_subplots(specs=[[{"secondary_y": True}]])
+
+# Chuva mensal como barras (eixo esquerdo)
+fig_clima.add_trace(go.Bar(
+    x=df_clima["nome"], y=df_clima["precipitacao_mm"],
+    name="Chuva", marker=dict(color=DS["accent_2"], opacity=0.85, line=dict(width=0)),
+    text=[f"{v:.0f}" for v in df_clima["precipitacao_mm"]],
+    textposition="outside", textfont=dict(size=10, color=DS["muted"], family=FONT_MONO),
+    hovertemplate="<b>%{x}</b><br>Chuva: %{y:.0f} mm<extra></extra>",
+    cliponaxis=False,
+), secondary_y=False)
+
+# Temperatura máxima
+fig_clima.add_trace(go.Scatter(
+    x=df_clima["nome"], y=df_clima["temp_max_c"],
+    name="Máx", mode="lines+markers",
+    line=dict(color=DS["danger"], width=2, shape="spline", smoothing=0.6),
+    marker=dict(size=5, color=DS["danger"]),
+    hovertemplate="<b>%{x}</b><br>Máx: %{y:.1f} °C<extra></extra>",
+), secondary_y=True)
+
+# Temperatura média
+fig_clima.add_trace(go.Scatter(
+    x=df_clima["nome"], y=df_clima["temp_media_c"],
+    name="Média", mode="lines",
+    line=dict(color=DS["ink"], width=2, dash="dot"),
+    hovertemplate="<b>%{x}</b><br>Média: %{y:.1f} °C<extra></extra>",
+), secondary_y=True)
+
+# Temperatura mínima
+fig_clima.add_trace(go.Scatter(
+    x=df_clima["nome"], y=df_clima["temp_min_c"],
+    name="Mín", mode="lines+markers",
+    line=dict(color=DS["accent_2"], width=2, shape="spline", smoothing=0.6),
+    marker=dict(size=5, color=DS["accent_2"]),
+    hovertemplate="<b>%{x}</b><br>Mín: %{y:.1f} °C<extra></extra>",
+), secondary_y=True)
+
+# Linha de geada (5°C)
+fig_clima.add_hline(y=5, line_dash="dash", line_color=DS["danger"], opacity=0.3,
+                    annotation_text="risco de geada", annotation_position="top right",
+                    annotation_font_size=10, annotation_font_color=DS["danger"],
+                    secondary_y=True)
+
+fig_clima.update_layout(
+    height=380,
+    font=dict(family=FONT_SANS, color=DS["ink_2"], size=11),
+    paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+    margin=dict(t=30, b=50, l=60, r=60),
+    bargap=0.5,
+    legend=dict(orientation="h", y=-0.2, x=0, font=dict(size=12, color=DS["ink_2"])),
+    hovermode="x unified",
+    hoverlabel=dict(bgcolor=DS["ink"], bordercolor=DS["ink"],
+                    font=dict(family=FONT_MONO, color="#fff", size=11)),
+)
+fig_clima.update_xaxes(gridcolor="rgba(0,0,0,0)", zeroline=False,
+                       tickfont=dict(color=DS["ink"], size=12), showline=False)
+fig_clima.update_yaxes(title_text="Chuva (mm)", secondary_y=False,
+                       gridcolor=DS["border"], zeroline=False,
+                       tickfont=dict(color=DS["muted"], size=11),
+                       title_font=dict(color=DS["muted"], size=11))
+fig_clima.update_yaxes(title_text="Temperatura (°C)", secondary_y=True,
+                       gridcolor="rgba(0,0,0,0)", zeroline=False,
+                       tickfont=dict(color=DS["muted"], size=11),
+                       title_font=dict(color=DS["muted"], size=11))
+chart_clima = pio.to_html(fig_clima, full_html=False, config=plotly_config)
+
+# ============================================================
 # MAPA FOLIUM
 # ============================================================
 # NOTA: URLs de tiles do Earth Engine (url_rgb/url_ndvi/url_uso) expiram em ~24h.
@@ -205,6 +406,16 @@ folium.TileLayer(tiles=url_ndvi, name="Vegetação (NDVI)", attr="ESA Copernicus
                  overlay=True, control=True, show=False, max_zoom=19, opacity=0.85).add_to(mapa)
 folium.TileLayer(tiles=url_uso, name="Uso do Solo (IA)", attr="Classificação ML",
                  overlay=True, control=True, show=True, max_zoom=19, opacity=0.80).add_to(mapa)
+folium.TileLayer(tiles=url_twi, name="Umidade (TWI)", attr="SRTM derivado",
+                 overlay=True, control=True, show=False, max_zoom=19, opacity=0.78).add_to(mapa)
+folium.TileLayer(tiles=url_ndwi, name="Água (NDWI)", attr="ESA Copernicus",
+                 overlay=True, control=True, show=False, max_zoom=19, opacity=0.85).add_to(mapa)
+folium.TileLayer(tiles=url_hillshade, name="Relevo 3D (Hillshade)", attr="SRTM",
+                 overlay=True, control=True, show=False, max_zoom=19, opacity=0.55).add_to(mapa)
+folium.TileLayer(tiles=url_classes, name="Declividade EMBRAPA", attr="SRTM classificado",
+                 overlay=True, control=True, show=False, max_zoom=19, opacity=0.75).add_to(mapa)
+folium.TileLayer(tiles=url_risco, name="Risco de erosão", attr="BSI × declividade",
+                 overlay=True, control=True, show=False, max_zoom=19, opacity=0.78).add_to(mapa)
 
 folium.GeoJson(
     gdf.to_json(),
@@ -221,7 +432,7 @@ from branca.element import Element
 mapa.get_root().html.add_child(Element("""
 <script>
 document.addEventListener('DOMContentLoaded', function() {
-    var exclusive = ['Sentinel-2', 'Vegetação (NDVI)', 'Uso do Solo (IA)'];
+    var exclusive = ['Sentinel-2', 'Vegetação (NDVI)', 'Uso do Solo (IA)', 'Umidade (TWI)', 'Água (NDWI)', 'Relevo 3D (Hillshade)', 'Declividade EMBRAPA', 'Risco de erosão'];
     function emitActive() {
         var active = null;
         document.querySelectorAll('.leaflet-control-layers-overlays label').forEach(function(lbl) {
@@ -1205,10 +1416,13 @@ footer strong {{ color: var(--ink); font-family: var(--ff-sans); font-weight: 60
         <div class="toc-label">Neste relatório</div>
         <ol>
             <li><a href="#mapa">Mapa do sítio</a></li>
+            <li><a href="#relevo">Relevo do terreno</a></li>
             <li><a href="#uso">Uso do solo</a></li>
             <li><a href="#zonas">Recomendações por zona</a></li>
+            <li><a href="#agua">Onde está a água</a></li>
             <li><a href="#vegetacao">Saúde da vegetação</a></li>
             <li><a href="#ciclo">Ciclo anual</a></li>
+            <li><a href="#clima">Clima histórico</a></li>
             <li><a href="#animais">Criação animal</a></li>
             <li><a href="#metodologia">Metodologia</a></li>
         </ol>
@@ -1256,6 +1470,56 @@ footer strong {{ color: var(--ink); font-family: var(--ff-sans); font-weight: 60
                     </div>
                     <p class="legend-explain"><strong>Sentinel-2</strong> é um satélite europeu da ESA que fotografa a Terra a cada 5 dias com resolução de 10 metros por pixel. Esta camada mostra a imagem real do sítio em cores naturais — o que você veria de um avião. É a base das análises de NDVI e Uso do Solo.</p>
                 </div>
+                <div class="legend-group" data-layer="twi">
+                    <div class="legend-row">
+                        <span class="legend-label">TWI</span>
+                        <span class="legend-scale" aria-hidden="true">
+                            <span class="legend-gradient" style="background:linear-gradient(90deg,#d73027 0%,#fee08b 30%,#d9ef8b 50%,#91cf60 70%,#1a9850 90%,#00441b 100%);"></span>
+                            <span class="legend-scale-labels"><span>seco</span><span>acúmulo de água</span></span>
+                        </span>
+                    </div>
+                    <p class="legend-explain"><strong>TWI (Topographic Wetness Index)</strong> é um índice calculado a partir da topografia que mostra <strong>para onde a água flui e se acumula</strong> quando chove. Valores altos (verde-escuro) indicam vales, baixadas e zonas úmidas — bons candidatos para tanque, nascente natural ou cultivos que gostam de solo úmido. Valores baixos (vermelho) são topos de morro e encostas íngremes, que secam rápido.</p>
+                </div>
+                <div class="legend-group" data-layer="ndwi">
+                    <div class="legend-row">
+                        <span class="legend-label">NDWI</span>
+                        <span class="legend-scale" aria-hidden="true">
+                            <span class="legend-gradient" style="background:linear-gradient(90deg,#d73027 0%,#fee08b 30%,#d9ef8b 50%,#91cf60 65%,#4575b4 85%,#313695 100%);"></span>
+                            <span class="legend-scale-labels"><span>solo seco</span><span>água</span></span>
+                        </span>
+                    </div>
+                    <p class="legend-explain"><strong>NDWI (Normalized Difference Water Index)</strong> detecta <strong>água superficial</strong> usando o contraste entre a banda verde e o infravermelho. Valores acima de zero (azul) indicam presença de água. É assim que se detecta lagos, tanques e rios em imagens de satélite. Complementar ao TWI: o TWI mostra <em>onde a água tende a estar</em>, o NDWI mostra <em>onde ela está de fato visível</em>.</p>
+                </div>
+                <div class="legend-group" data-layer="hillshade">
+                    <div class="legend-row">
+                        <span class="legend-label">Relevo 3D</span>
+                        <span class="legend-scale" aria-hidden="true">
+                            <span class="legend-gradient" style="background:linear-gradient(90deg,#000 0%,#fff 100%);"></span>
+                            <span class="legend-scale-labels"><span>sombra</span><span>luz</span></span>
+                        </span>
+                    </div>
+                    <p class="legend-explain"><strong>Hillshade</strong> simula a luz do sol iluminando o terreno a partir do noroeste. Áreas claras são encostas viradas para o sol; áreas escuras são vales sombreados. É o mesmo efeito visual que você vê em mapas topográficos profissionais — ajuda a perceber ondulação, vales e cumes mesmo sem linhas de nível.</p>
+                </div>
+                <div class="legend-group" data-layer="embrapa">
+                    <div class="legend-row">
+                        <span class="legend-label">EMBRAPA</span>
+                        <span class="legend-chip"><span class="dot" style="background:#1a9850"></span> Plano (0–3°)</span>
+                        <span class="legend-chip"><span class="dot" style="background:#a6d96a"></span> Suave (3–8°)</span>
+                        <span class="legend-chip"><span class="dot" style="background:#fee08b"></span> Ondulado (8–20°)</span>
+                        <span class="legend-chip"><span class="dot" style="background:#f46d43"></span> Forte (20–45°)</span>
+                        <span class="legend-chip"><span class="dot" style="background:#d73027"></span> Montanhoso (&gt;45°)</span>
+                    </div>
+                    <p class="legend-explain"><strong>Classes de declividade EMBRAPA</strong> são o padrão oficial brasileiro para classificar terrenos conforme a inclinação. Cada classe tem uma aptidão agrícola: <strong>plano</strong> aceita mecanização total; <strong>ondulado</strong> exige plantio em curvas de nível; <strong>forte ondulado</strong> e <strong>montanhoso</strong> devem ser preservados ou usados só com muito cuidado contra erosão.</p>
+                </div>
+                <div class="legend-group" data-layer="erosao">
+                    <div class="legend-row">
+                        <span class="legend-label">Erosão</span>
+                        <span class="legend-chip"><span class="dot" style="background:#1a9850"></span> Baixo</span>
+                        <span class="legend-chip"><span class="dot" style="background:#fee08b"></span> Médio</span>
+                        <span class="legend-chip"><span class="dot" style="background:#d73027"></span> Alto</span>
+                    </div>
+                    <p class="legend-explain"><strong>Risco de erosão</strong> combina <strong>declividade</strong> (quanto mais inclinado, mais risco) com <strong>BSI</strong> (Bare Soil Index — quanto solo exposto sem cobertura vegetal). Áreas <span style="color:#d73027;font-weight:600;">vermelhas</span> são críticas: inclinação forte com pouca proteção natural. Nessas zonas, solo exposto pode ser lavado rapidamente pelas chuvas — cobrir com pastagem, curvas de nível ou plantio em faixas é essencial.</p>
+                </div>
                 <div class="legend-group" data-layer="none">
                     <div class="legend-row">
                         <span class="legend-label">Satélite</span>
@@ -1265,11 +1529,78 @@ footer strong {{ color: var(--ink); font-family: var(--ff-sans); font-weight: 60
             </div>
         </section>
 
+        <!-- RELEVO 3D (novo v2.0) -->
+        <section class="section reveal" id="relevo">
+            <div class="section-head">
+                <div class="section-head-left">
+                    <div class="section-tag">02 / Relevo</div>
+                    <h2>Como é o formato do terreno</h2>
+                    <p class="dek">Usando o <strong>SRTM</strong> (modelo de elevação da NASA) analisamos a <strong>inclinação oficial pela classificação EMBRAPA</strong> e a <strong>orientação das encostas</strong> — decisivo na serra porque determina quanto sol cada pedaço do sítio recebe e onde o terreno aceita cultivo ou deve ser preservado.</p>
+                </div>
+                <div class="panel-meta">Fonte · NASA SRTM 30 m</div>
+            </div>
+
+            <h3 style="margin-top:8px;">Classes oficiais de declividade (EMBRAPA)</h3>
+            <div class="panel panel-pad-lg">
+                <div class="panel-head">
+                    <div class="panel-title">Distribuição do terreno por classe de inclinação</div>
+                    <div class="panel-meta">{sd['media']:.1f}° médios · máx {sd['maximo']:.1f}°</div>
+                </div>
+                <div class="chart">{chart_embrapa}</div>
+                <div class="legend" style="padding-top:12px;">
+                    <div class="legend-group active" style="display:flex;">
+                        <span class="legend-chip"><span class="dot" style="background:#1a9850"></span> Plano (0–3°)</span>
+                        <span class="legend-chip"><span class="dot" style="background:#a6d96a"></span> Suave ondulado (3–8°)</span>
+                        <span class="legend-chip"><span class="dot" style="background:#fee08b"></span> Ondulado (8–20°)</span>
+                        <span class="legend-chip"><span class="dot" style="background:#f46d43"></span> Forte ondulado (20–45°)</span>
+                        <span class="legend-chip"><span class="dot" style="background:#d73027"></span> Montanhoso (&gt;45°)</span>
+                    </div>
+                </div>
+                <div class="chart-caption">
+                    Cada classe tem aptidão agrícola distinta. <strong>Plano e suave ondulado</strong> aceitam mecanização; <strong>ondulado</strong> exige plantio em curvas de nível; <strong>forte ondulado e montanhoso</strong> devem ser preservados ou usados só com manejo cuidadoso contra erosão. Para ver essa classificação desenhada no mapa, ative <em>Declividade EMBRAPA</em> lá em cima.
+                </div>
+            </div>
+
+            <h3 style="margin-top:40px;">Risco de erosão</h3>
+            <div class="panel panel-pad-lg">
+                <div class="panel-head">
+                    <div class="panel-title">Quanto do sítio está em risco</div>
+                    <div class="panel-meta">Declividade × solo exposto (BSI)</div>
+                </div>
+                <div class="inline-metrics" style="margin-top:0;border-top:none;">
+                    {inline_metric(f"{pct_risco['baixo']:.0f}%", "Risco baixo", "Cobertura boa, inclinação suave")}
+                    {inline_metric(f"{pct_risco['medio']:.0f}%", "Risco médio", "Atenção em chuvas fortes")}
+                    {inline_metric(f"{pct_risco['alto']:.0f}%", "Risco alto", "Ação preventiva recomendada")}
+                </div>
+                {'<div class="alert alert-red" style="margin-top:20px;"><div><strong>' + f"{pct_risco['alto']:.0f}% do sítio em risco alto de erosão" + '.</strong> Ative <em>Risco de erosão</em> no mapa acima para ver onde estão as zonas críticas. Prioridades: evitar solo exposto em encostas &gt;20°, plantar em curvas de nível, manter pastagem rotacionada em vez de pousio descoberto, considerar terraceamento ou barreiras vegetais.</div></div>' if pct_risco['alto'] > 10 else '<div class="alert alert-green" style="margin-top:20px;"><div><strong>Risco de erosão controlado.</strong> A cobertura vegetal atual e a inclinação combinam-se sem gerar zonas críticas extensas. Mantenha o pasto vivo e evite expor o solo em encostas nos próximos meses de chuva.</div></div>'}
+                <div class="chart-caption" style="margin-top:14px;padding-top:14px;">
+                    O índice combina <strong>declividade</strong> (60% do peso) com <strong>BSI</strong> — Bare Soil Index — (40% do peso). BSI é calculado a partir das bandas vermelho, infravermelho, SWIR e azul do Sentinel-2 e detecta solo sem cobertura vegetal.
+                </div>
+            </div>
+
+            <h3 style="margin-top:40px;">Orientação das encostas (aspecto)</h3>
+            <div class="panel panel-pad-lg">
+                <div class="uso-grid">
+                    <div class="chart">{chart_rosa}</div>
+                    <div>
+                        <div style="font-family:var(--ff-mono);font-size:10.5px;text-transform:uppercase;letter-spacing:0.1em;color:var(--muted);margin-bottom:8px;">Face predominante</div>
+                        <div style="font-family:var(--ff-sans);font-size:2rem;font-weight:500;color:var(--ink);letter-spacing:-0.02em;margin-bottom:10px;">{face_nome} <span style="color:var(--muted);font-size:0.6em;font-family:var(--ff-mono);">{pct_aspecto.get(face_predominante, 0):.0f}%</span></div>
+                        <p style="font-size:14px;color:var(--ink-3);line-height:1.6;margin-bottom:20px;">
+                            A maior parte do sítio está voltada para <strong>{face_nome.lower()}</strong>, o que significa: <strong>{face_implicacao}</strong>.
+                        </p>
+                        <p style="font-size:13px;color:var(--muted);line-height:1.6;">
+                            A rosa mostra a distribuição de todas as 8 faces cardinais. Aproveite faces Norte e Leste para frutas e horta que querem sol; reserve faces Sul e Sudoeste para mata, culturas de sombra ou áreas úmidas.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
         <!-- USO DO SOLO -->
         <section class="section reveal" id="uso">
             <div class="section-head">
                 <div class="section-head-left">
-                    <div class="section-tag">02 / Composição</div>
+                    <div class="section-tag">03 / Composição</div>
                     <h2>O que tem no sítio</h2>
                     <p class="dek">Um modelo de <abbr title="Algoritmo de aprendizado de máquina treinado para identificar padrões de vegetação, solo e água nas imagens.">classificação por IA</abbr> separou o terreno em cinco classes. Cada uma tem papel e vocação distintos.</p>
                 </div>
@@ -1292,7 +1623,7 @@ footer strong {{ color: var(--ink); font-family: var(--ff-sans); font-weight: 60
         <section class="section reveal" id="zonas">
             <div class="section-head">
                 <div class="section-head-left">
-                    <div class="section-tag">03 / Recomendações</div>
+                    <div class="section-tag">04 / Recomendações</div>
                     <h2>O que plantar e onde</h2>
                     <p class="dek">Cruzamos vegetação (NDVI), inclinação e umidade com as necessidades de cada cultura. Cada zona tem restrições — e oportunidades.</p>
                 </div>
@@ -1399,11 +1730,57 @@ footer strong {{ color: var(--ink); font-family: var(--ff-sans); font-weight: 60
             </div>
         </section>
 
+        <!-- ÁGUA (novo v2.0) -->
+        <section class="section reveal" id="agua">
+            <div class="section-head">
+                <div class="section-head-left">
+                    <div class="section-tag">05 / Água</div>
+                    <h2>Onde está a água do sítio</h2>
+                    <p class="dek">Cruzamos o relevo do terreno com imagens de satélite para descobrir <strong>onde a água tende a acumular</strong> (candidatos a tanque, nascente, zonas úmidas) e <strong>onde existe água superficial visível</strong>. No mapa acima, ative as camadas <em>Umidade (TWI)</em> e <em>Água (NDWI)</em>.</p>
+                </div>
+                <div class="panel-meta">Fontes · SRTM 30 m · Sentinel-2</div>
+            </div>
+
+            <div class="inline-metrics">
+                {inline_metric(f"{twi_pct['umido']:.0f}%", "Área úmida", "TWI ≥ 2 — zonas de acúmulo")}
+                {inline_metric(f"{twi_pct['moderado']:.0f}%", "Umidade moderada", "TWI entre 0,5 e 2")}
+                {inline_metric(f"{twi_pct['seco']:.0f}%", "Área seca", "TWI < 0,5 — topo/encosta")}
+                {inline_metric(f"{ndwi_stats['pct_agua']:.1f}%", "Água detectada", f"NDWI > 0 em {int(ndwi_stats['n_pixels'])} pixels")}
+            </div>
+
+            <div class="panel panel-pad-lg" style="margin-top:32px;">
+                <div class="panel-head">
+                    <div class="panel-title">Onde fazer o tanque de peixes</div>
+                    <div class="panel-meta">Melhor ponto (TWI máximo)</div>
+                </div>
+                <p style="font-size:14.5px;color:var(--ink-2);line-height:1.65;margin:4px 0 16px;">
+                    O satélite calculou o <strong>TWI (Topographic Wetness Index)</strong> em cada pedaço de 30×30 metros do sítio. O pixel com maior valor — onde a água naturalmente tende a se acumular — está em:
+                </p>
+                <div class="zona-stats">
+                    <div class="zona-stat"><div class="zona-stat-label">Latitude</div><div class="zona-stat-val mono">{twi_ponto['lat']:.5f}°</div></div>
+                    <div class="zona-stat"><div class="zona-stat-label">Longitude</div><div class="zona-stat-val mono">{twi_ponto['lon']:.5f}°</div></div>
+                    <div class="zona-stat"><div class="zona-stat-label">TWI</div><div class="zona-stat-val mono">{twi_ponto['twi']:.2f}</div></div>
+                    <div class="zona-stat"><div class="zona-stat-label">Comparado à média</div><div class="zona-stat-val mono">+{(twi_ponto['twi'] - twi_stats['media']):.1f}</div></div>
+                </div>
+                <div class="alert alert-blue" style="margin-top:20px;"><div>
+                    <strong>Verifique no campo.</strong> O TWI indica o ponto mais provável pelo formato do terreno, mas confirme na visita presencial: solo encharcado mesmo em dia seco, presença de samambaias, musgos, juncos ou mudança abrupta no tipo de vegetação são sinais de água subterrânea próxima.
+                </div></div>
+            </div>
+
+            {'<div class="alert alert-blue" style="margin-top:20px;"><div><strong>Água superficial: não detectada.</strong> Das '+ str(int(ndwi_stats['n_pixels'])) +' medições do Sentinel-2, nenhuma mostrou NDWI positivo suficiente para confirmar lâmina d\'água visível do espaço. Não quer dizer que não há nascentes — apenas que nada chega a formar um corpo d\'água grande o bastante para o satélite enxergar com resolução de 10 m.</div></div>' if ndwi_stats['pct_agua'] < 1 else ''}
+
+            <h3 style="margin-top:32px;">Como interpretar no mapa</h3>
+            <div class="cards">
+                {card("TWI — Umidade topográfica", "Verde-escuro no mapa = onde a água acumula naturalmente. Ideal para tanque escavado, culturas que gostam de umidade (taioba, inhame, agrião) e ponto de busca por nascentes.")}
+                {card("NDWI — Água visível", "Azul no mapa = lâmina d'água detectada pelo satélite. Se não há azul dentro do sítio, você depende de fontes externas (Ribeirão Sousas passa perto, a ~XYZ metros) ou de captação pluvial.")}
+            </div>
+        </section>
+
         <!-- VEGETAÇÃO -->
         <section class="section reveal" id="vegetacao">
             <div class="section-head">
                 <div class="section-head-left">
-                    <div class="section-tag">04 / Vegetação</div>
+                    <div class="section-tag">06 / Vegetação</div>
                     <h2>A vegetação está melhorando ou piorando?</h2>
                     <p class="dek">Acompanhamos o sítio nos últimos três anos com <strong>{len(df)} imagens</strong> do Sentinel-2. A faixa verde marca a zona saudável de NDVI (≥ 0,60). Pontos acima são bons sinais — abaixo, alerta.</p>
                 </div>
@@ -1428,7 +1805,7 @@ footer strong {{ color: var(--ink); font-family: var(--ff-sans); font-weight: 60
         <section class="section reveal" id="ciclo">
             <div class="section-head">
                 <div class="section-head-left">
-                    <div class="section-tag">05 / Ciclo</div>
+                    <div class="section-tag">07 / Ciclo</div>
                     <h2>Qual a melhor época do ano?</h2>
                     <p class="dek">A vegetação segue o ciclo de chuvas. Saber isso ajuda a planejar plantio, manejo de pasto e colheita.</p>
                 </div>
@@ -1443,11 +1820,50 @@ footer strong {{ color: var(--ink); font-family: var(--ff-sans); font-weight: 60
             </div>
         </section>
 
+        <!-- CLIMA HISTÓRICO (novo v2.0) -->
+        <section class="section reveal" id="clima">
+            <div class="section-head">
+                <div class="section-head-left">
+                    <div class="section-tag">08 / Clima</div>
+                    <h2>Clima histórico da região</h2>
+                    <p class="dek">Dez anos (2015–2024) de dados climáticos das bases globais <abbr title="Climate Hazards Group InfraRed Precipitation with Stations — chuva diária estimada por satélite e estações meteorológicas, resolução 5 km.">CHIRPS</abbr> (chuva) e <abbr title="Reanálise climática da ECMWF — combina observações globais com modelos físicos para produzir estimativas horárias de temperatura, umidade e vento em 9 km.">ERA5-Land</abbr> (temperatura), ambas rodando no Earth Engine. Mostra o padrão típico do clima que o sítio vai enfrentar a cada ano.</p>
+                </div>
+                <div class="panel-meta">CHIRPS · ERA5-Land · 2015–2024</div>
+            </div>
+
+            <div class="inline-metrics" style="margin-bottom:32px;">
+                {inline_metric(f"{chuva_total_anual:.0f} mm", "Chuva anual", f"Mais chuvoso: {mes_mais_chuvoso}")}
+                {inline_metric(f"{temp_media_anual:.1f} °C", "Temperatura média", "Ano inteiro")}
+                {inline_metric(f"{temp_min_geral:.1f} °C", "Mínima histórica", f"{mes_mais_frio} (mais frio)")}
+                {inline_metric(f"{temp_max_geral:.1f} °C", "Máxima histórica", "Ano inteiro")}
+            </div>
+
+            <div class="panel panel-pad-lg">
+                <div class="panel-head">
+                    <div class="panel-title">Chuva e temperatura por mês</div>
+                    <div class="panel-meta">Média dos últimos 10 anos</div>
+                </div>
+                <div class="chart">{chart_clima}</div>
+                <div class="chart-caption">
+                    As <span style="color:#0EA5E9;font-weight:600;">barras azuis</span> mostram a chuva total esperada em cada mês (mm). As linhas mostram temperatura <span style="color:#DC2626;font-weight:600;">máxima</span>, média e <span style="color:#0EA5E9;font-weight:600;">mínima</span>. A linha tracejada em 5 °C marca o <strong>risco de geada</strong> — crítico para cultivos sensíveis como tomate, banana e café.
+                </div>
+            </div>
+
+            {'<div class="alert alert-yellow" style="margin-top:20px;"><div><strong>Risco de geada confirmado.</strong> Em ' + mes_mais_frio + ', a temperatura mínima histórica caiu para ' + f"{temp_min_geral:.1f}" + ' °C — abaixo do limiar de 5 °C. Culturas sensíveis (banana, tomate, café em mudas) precisam de proteção no inverno: quebra-ventos, plantio em face Norte, cobertura morta, irrigação pré-geada.</div></div>' if risco_geada else '<div class="alert alert-green" style="margin-top:20px;"><div><strong>Sem histórico de geada severa</strong> — a temperatura mínima raramente desce abaixo de 5 °C na média dos últimos 10 anos. Mesmo assim, culturas muito sensíveis podem sofrer em anos atípicos.</div></div>'}
+
+            <h3 style="margin-top:32px;">Como ler isso no contexto do sítio</h3>
+            <div class="cards">
+                {card("Plantio acompanha a chuva", f"Com {chuva_total_anual:.0f} mm/ano concentrados entre outubro e março, culturas de ciclo curto (milho, feijão, abóbora) funcionam bem se plantadas em set-nov. Culturas perenes precisam de irrigação de apoio no inverno seco.")}
+                {card("Pasto verde segue a estação", "A vegetação (NDVI) do sítio acompanha exatamente o ciclo de chuvas — pico em jan-fev, mínimo em ago-set. Planeje estoque de pasto ou suplementação para o inverno.")}
+                {card("Altitude compensa o calor", f"A temperatura média de {temp_media_anual:.1f} °C é agradável para cultivos de clima ameno (morango, amora, framboesa, brássicas). O sítio está na Mantiqueira — pensar 'clima de serra', não 'clima tropical de vale'.")}
+            </div>
+        </section>
+
         <!-- ANIMAIS -->
         <section class="section reveal" id="animais">
             <div class="section-head">
                 <div class="section-head-left">
-                    <div class="section-tag">06 / Criação</div>
+                    <div class="section-tag">09 / Criação</div>
                     <h2>Quais animais criar</h2>
                     <p class="dek">Recomendações para {area_m2/10_000:.1f} ha na Serra da Mantiqueira, altitude {se['media']:.0f} m. Priorizamos raças adaptadas ao clima frio de inverno e ao relevo inclinado.</p>
                 </div>
@@ -1465,7 +1881,7 @@ footer strong {{ color: var(--ink); font-family: var(--ff-sans); font-weight: 60
         <section class="section reveal" id="metodologia">
             <div class="section-head">
                 <div class="section-head-left">
-                    <div class="section-tag">07 / Metodologia</div>
+                    <div class="section-tag">10 / Metodologia</div>
                     <h2>Como o relatório foi feito</h2>
                     <p class="dek">Dados brutos, resoluções e fontes. Para quem quiser replicar ou aprofundar.</p>
                 </div>
@@ -1533,6 +1949,11 @@ window.addEventListener('message', function(e) {{
     if (layer === 'Uso do Solo (IA)') key = 'uso';
     else if (layer === 'Vegetação (NDVI)') key = 'ndvi';
     else if (layer === 'Sentinel-2') key = 'sentinel';
+    else if (layer === 'Umidade (TWI)') key = 'twi';
+    else if (layer === 'Água (NDWI)') key = 'ndwi';
+    else if (layer === 'Relevo 3D (Hillshade)') key = 'hillshade';
+    else if (layer === 'Declividade EMBRAPA') key = 'embrapa';
+    else if (layer === 'Risco de erosão') key = 'erosao';
     document.querySelectorAll('#map-legend .legend-group').forEach(function(g) {{
         g.classList.toggle('active', g.dataset.layer === key);
     }});
