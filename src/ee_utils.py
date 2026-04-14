@@ -673,6 +673,54 @@ def obter_estatisticas_ndwi(ndwi: ee.Image, geometria: ee.Geometry) -> dict:
 # Clima histórico (CHIRPS + ERA5)
 # ============================================================
 
+def gerar_thumbnail_local(
+    composto: ee.Image,
+    geometria: ee.Geometry,
+    ponto_lat: float,
+    ponto_lon: float,
+    dimensoes: int = 900,
+    marker_color: str = "#65A30D",
+    outline_color: str = "#FBBF24",
+    rgb_min: int = 0,
+    rgb_max: int = 3000,
+    gamma: float = 1.2,
+) -> str:
+    """Gera URL de um PNG estático Sentinel-2 RGB recortado no polígono do sítio.
+
+    Pixels fora do polígono ficam transparentes (fundo PNG com alpha=0),
+    permitindo que a imagem apareça só com o formato do sítio.
+    """
+    poly_fc = ee.FeatureCollection([ee.Feature(geometria)])
+
+    # Máscara: 1 dentro do polígono, 0 fora -> selfMask() torna 0 = transparente
+    mascara = ee.Image.constant(0).byte().paint(poly_fc, 1).selfMask()
+
+    rgb = composto.select(["B4", "B3", "B2"]).visualize(min=rgb_min, max=rgb_max, gamma=gamma)
+    rgb_mask = rgb.updateMask(mascara)
+
+    # Contorno do sítio (linha amarela) — exatamente na borda do polígono
+    linha = ee.Image().byte().paint(poly_fc, 1, 3)
+    linha_vis = linha.visualize(palette=[outline_color], min=0, max=1).updateMask(linha)
+
+    # Marcador circular verde no ponto
+    ponto = ee.Geometry.Point([ponto_lon, ponto_lat])
+    ring_fc = ee.FeatureCollection([ee.Feature(ponto.buffer(20))])
+    fill_fc = ee.FeatureCollection([ee.Feature(ponto.buffer(10))])
+    ring = ee.Image().byte().paint(ring_fc, 1, 4)
+    ring_vis = ring.visualize(palette=[marker_color], min=0, max=1).updateMask(ring)
+    fill = ee.Image().byte().paint(fill_fc, 1)
+    fill_vis = fill.visualize(palette=[marker_color], min=0, max=1).updateMask(fill)
+
+    final = rgb_mask.blend(linha_vis).blend(ring_vis).blend(fill_vis)
+
+    region = geometria.bounds().buffer(40).bounds()
+    return final.getThumbURL({
+        "region": region,
+        "dimensions": dimensoes,
+        "format": "png",
+    })
+
+
 def extrair_serie_chuva_mensal(geometria: ee.Geometry, ano_inicio: int = 2015, ano_fim: int = 2024) -> "pd.DataFrame":
     """Série mensal de precipitação usando CHIRPS (0,05° ≈ 5 km).
 

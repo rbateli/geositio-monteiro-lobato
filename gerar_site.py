@@ -77,6 +77,10 @@ ndwi_img = calcular_ndwi_agua(colecao, geometria)
 ndwi_stats = obter_estatisticas_ndwi(ndwi_img, geometria)
 url_ndwi = gerar_url_tile_ndwi(ndwi_img)
 
+# Thumbnail do melhor ponto — usamos PNG estático fornecido pelo Rafael em data/thumb_agua.png
+# (não regeramos via Earth Engine; a imagem curada fica versionada no repositório).
+thumb_ok = Path("data/thumb_agua.png").exists()
+
 print("[9/10] Clima historico (CHIRPS + ERA5)...")
 df_chuva = extrair_serie_chuva_mensal(geometria, ano_inicio=2015, ano_fim=2024)
 df_temp = extrair_serie_temperatura_mensal(geometria, ano_inicio=2015, ano_fim=2024)
@@ -1018,6 +1022,60 @@ body::before {{
 @media (max-width: 560px) {{ .uso-row {{ grid-template-columns: 14px 1fr 56px; gap: 12px; }} .uso-desc {{ display: none; }} }}
 
 /* ============================================================
+   Thumb-grid (imagem aérea + metadados)
+   ============================================================ */
+.thumb-grid {{
+    display: grid;
+    grid-template-columns: minmax(260px, 0.9fr) 1fr;
+    gap: 28px;
+    align-items: start;
+}}
+@media (max-width: 760px) {{
+    .thumb-grid {{ grid-template-columns: 1fr; gap: 20px; }}
+}}
+.thumb-wrap {{ display: flex; flex-direction: column; gap: 10px; }}
+.local-thumb {{
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    object-fit: cover;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    display: block;
+    box-shadow: var(--shadow-xs);
+    background: var(--surface-2);
+}}
+.thumb-placeholder {{
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    border-radius: var(--radius);
+    border: 1px dashed var(--border);
+    display: flex; align-items: center; justify-content: center;
+    color: var(--muted);
+    font-size: 12px;
+    font-family: var(--ff-mono);
+}}
+.thumb-caption {{
+    font-size: 11.5px;
+    color: var(--muted);
+    line-height: 1.5;
+    font-family: var(--ff-mono);
+}}
+.thumb-block {{
+    margin: 24px auto 4px;
+    max-width: 520px;
+    display: flex; flex-direction: column; gap: 10px;
+}}
+.local-thumb-full {{
+    width: 100%;
+    height: auto;
+    display: block;
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    border-radius: 0;
+}}
+
+/* ============================================================
    Tabs zonas
    ============================================================ */
 .tabs {{
@@ -1762,6 +1820,7 @@ footer strong {{ color: var(--ink); font-family: var(--ff-sans); font-weight: 60
                     <div class="zona-stat"><div class="zona-stat-label">TWI</div><div class="zona-stat-val mono">{twi_ponto['twi']:.2f}</div></div>
                     <div class="zona-stat"><div class="zona-stat-label">Comparado à média</div><div class="zona-stat-val mono">+{(twi_ponto['twi'] - twi_stats['media']):.1f}</div></div>
                 </div>
+                {f'<figure class="thumb-block"><img src="thumb_agua.png?v={int(Path("data/thumb_agua.png").stat().st_mtime) if thumb_ok else 0}" alt="Imagem aérea Sentinel-2 do sítio com o ponto de maior TWI marcado" class="local-thumb-full" loading="lazy"><figcaption class="thumb-caption">Sentinel-2 · 10 m/px · sítio contornado em amarelo · ponto de TWI máximo marcado em <span style="color:#65A30D;font-weight:600;">verde-lima</span></figcaption></figure>' if thumb_ok else ''}
                 <div class="alert alert-blue" style="margin-top:20px;"><div>
                     <strong>Verifique no campo.</strong> O TWI indica o ponto mais provável pelo formato do terreno, mas confirme na visita presencial: solo encharcado mesmo em dia seco, presença de samambaias, musgos, juncos ou mudança abrupta no tipo de vegetação são sinais de água subterrânea próxima.
                 </div></div>
