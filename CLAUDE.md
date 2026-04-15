@@ -18,9 +18,13 @@ Final artifact is a static HTML dashboard (`data/sitio.html`, ~14 MB) generated 
 - **Image processing:** Pillow + NumPy (for thumbnail cropping)
 - **Data sources (active):** Sentinel-2 (ESA), SRTM 30 m (NASA), CHIRPS (chuva, UCSB), ERA5-Land (ECMWF), Esri World Imagery (tiles base)
 
-## Current Version — v2.0
+## Current Version — v3.0
 
 Site has **10 sections** with sticky TOC + scroll-spy and **8 satellite layers** on the map, all with dynamic legends (postMessage bridge between the Folium iframe and the parent site).
+
+**v3.0 (abr/2026)** expandiu a seção Clima com dois blocos novos:
+- Série anual de chuva 2015–2024 (CHIRPS soma anual) destacando ano mais seco e mais chuvoso vs média.
+- Cruzamento NDVI × chuva mensal (2023–2026) com cálculo de correlação em lag 0/1/2 meses, mostrando que a vegetação responde à chuva com atraso.
 
 ### Sections (in order)
 
@@ -31,7 +35,7 @@ Site has **10 sections** with sticky TOC + scroll-spy and **8 satellite layers**
 5. **Onde está a água** — TWI (Topographic Wetness Index) + NDWI + coordenadas do ponto ótimo pro tanque + thumbnail estático `data/thumb_agua.png`
 6. **Saúde da vegetação** — NDVI série temporal 3 anos (~120 medições)
 7. **Ciclo anual** — NDVI sazonal mensal
-8. **Clima histórico** — CHIRPS (chuva) + ERA5-Land (temp) 2015–2024 com linha de risco de geada em 5 °C
+8. **Clima histórico** — CHIRPS (chuva) + ERA5-Land (temp) 2015–2024 com linha de risco de geada em 5 °C. Inclui série anual de chuva (anos anômalos) e cruzamento NDVI × chuva com análise de lag (v3.0)
 9. **Criação animal** — lista editorial padronizada (sem emojis)
 10. **Metodologia** — `<details>` com stats brutas + fontes
 
@@ -102,7 +106,7 @@ Pipeline atual em 10 etapas (prints `[1/10]` a `[9/10]`).
 ## Git
 
 - Branch principal: `master` (não `main`)
-- Tags: `v1.0` (dashboard minimalista inicial) · `v2.0` (Água + Relevo + Erosão + Clima)
+- Tags: `v1.0` (dashboard minimalista inicial) · `v2.0` (Água + Relevo + Erosão + Clima) · `v2.0.1` (thumbnail curado Água) · `v3.0` (Clima expandido: série anual + NDVI × chuva)
 - Voltar a uma versão: `git checkout v1.0`
 
 ## Quando trabalhar no site

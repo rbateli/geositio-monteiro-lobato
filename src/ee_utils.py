@@ -746,6 +746,58 @@ def extrair_serie_chuva_mensal(geometria: ee.Geometry, ano_inicio: int = 2015, a
     return pd.DataFrame(registros)
 
 
+def extrair_serie_chuva_anual(geometria: ee.Geometry, ano_inicio: int = 2015, ano_fim: int = 2024) -> "pd.DataFrame":
+    """Série anual de precipitação (total em mm por ano) via CHIRPS.
+
+    Útil para detectar anos anômalos (secas como 2014/2021, La Niña 2022).
+    Amostra no centróide (pixel CHIRPS ~5 km > sítio 180 m).
+    """
+    import pandas as pd
+    ponto = geometria.centroid(1)
+    chirps = ee.ImageCollection("UCSB-CHG/CHIRPS/DAILY").select("precipitation")
+    registros = []
+    for ano in range(ano_inicio, ano_fim + 1):
+        filtrada = chirps.filterDate(f"{ano}-01-01", f"{ano+1}-01-01")
+        # Soma total de chuva no ano (sum de precip diária)
+        res = filtrada.sum().reduceRegion(
+            reducer=ee.Reducer.mean(), geometry=ponto, scale=5566, maxPixels=1e9
+        ).getInfo() or {}
+        val = res.get("precipitation") or 0
+        registros.append({"ano": ano, "precipitacao_mm": val})
+    return pd.DataFrame(registros)
+
+
+def extrair_serie_chuva_mensal_temporal(
+    geometria: ee.Geometry,
+    data_inicio: str,
+    data_fim: str,
+) -> "pd.DataFrame":
+    """Série mensal de chuva (mm) entre duas datas, com timestamp por mês.
+
+    Diferente de extrair_serie_chuva_mensal (que agrega 10 anos em 12 médias),
+    esta retorna um ponto por mês calendário — útil para cruzar com NDVI.
+    """
+    import pandas as pd
+    from datetime import datetime
+    ponto = geometria.centroid(1)
+    chirps = ee.ImageCollection("UCSB-CHG/CHIRPS/DAILY").select("precipitation")
+    inicio = datetime.strptime(data_inicio, "%Y-%m-%d")
+    fim = datetime.strptime(data_fim, "%Y-%m-%d")
+    registros = []
+    ano, mes = inicio.year, inicio.month
+    while (ano, mes) <= (fim.year, fim.month):
+        prox_mes = (mes % 12) + 1
+        prox_ano = ano + (1 if prox_mes == 1 else 0)
+        filtrada = chirps.filterDate(f"{ano}-{mes:02d}-01", f"{prox_ano}-{prox_mes:02d}-01")
+        res = filtrada.sum().reduceRegion(
+            reducer=ee.Reducer.mean(), geometry=ponto, scale=5566, maxPixels=1e9
+        ).getInfo() or {}
+        val = res.get("precipitation") or 0
+        registros.append({"data": pd.Timestamp(year=ano, month=mes, day=15), "precipitacao_mm": val})
+        ano, mes = prox_ano, prox_mes
+    return pd.DataFrame(registros)
+
+
 def extrair_serie_temperatura_mensal(geometria: ee.Geometry, ano_inicio: int = 2015, ano_fim: int = 2024) -> "pd.DataFrame":
     """Série mensal de temperatura (média, min, max) a partir do ERA5-Land diário.
 

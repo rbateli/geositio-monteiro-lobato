@@ -96,6 +96,39 @@ mes_mais_chuvoso = df_clima.loc[df_clima["precipitacao_mm"].idxmax(), "nome"]
 mes_mais_seco_clima = df_clima.loc[df_clima["precipitacao_mm"].idxmin(), "nome"]
 risco_geada = temp_min_geral < 5.0
 
+# --- v3.0: série anual + cruzamento NDVI × chuva ---
+df_chuva_anual = extrair_serie_chuva_anual(geometria, ano_inicio=2015, ano_fim=2024)
+chuva_media_anos = df_chuva_anual["precipitacao_mm"].mean()
+ano_mais_seco = int(df_chuva_anual.loc[df_chuva_anual["precipitacao_mm"].idxmin(), "ano"])
+ano_mais_chuvoso = int(df_chuva_anual.loc[df_chuva_anual["precipitacao_mm"].idxmax(), "ano"])
+chuva_ano_seco = df_chuva_anual["precipitacao_mm"].min()
+chuva_ano_chuvoso = df_chuva_anual["precipitacao_mm"].max()
+
+# Janela de cruzamento NDVI × chuva (mesmo período da série NDVI)
+df_chuva_serie = extrair_serie_chuva_mensal_temporal(geometria, "2023-04-01", "2026-04-01")
+# Agrega NDVI em média mensal pra bater com a chuva mensal
+df_ndvi_mensal = (
+    df.assign(ym=df["data"].dt.to_period("M"))
+      .groupby("ym")["ndvi_medio"].mean()
+      .reset_index()
+)
+df_ndvi_mensal["data"] = df_ndvi_mensal["ym"].dt.to_timestamp() + pd.offsets.Day(14)
+df_cross = pd.merge_asof(
+    df_ndvi_mensal.sort_values("data"),
+    df_chuva_serie.sort_values("data"),
+    on="data", direction="nearest", tolerance=pd.Timedelta(days=20),
+).dropna()
+# Correlação com chuva defasada (NDVI responde com 1-2 meses de atraso)
+df_cross["chuva_lag1"] = df_cross["precipitacao_mm"].shift(1)
+df_cross["chuva_lag2"] = df_cross["precipitacao_mm"].shift(2)
+corr_sem_lag = df_cross[["ndvi_medio", "precipitacao_mm"]].corr().iloc[0, 1]
+corr_lag1 = df_cross[["ndvi_medio", "chuva_lag1"]].corr().iloc[0, 1]
+corr_lag2 = df_cross[["ndvi_medio", "chuva_lag2"]].corr().iloc[0, 1]
+# Melhor defasagem
+_lags = {0: corr_sem_lag, 1: corr_lag1, 2: corr_lag2}
+melhor_lag = max(_lags, key=lambda k: _lags[k] if pd.notna(_lags[k]) else -1)
+melhor_corr = _lags[melhor_lag]
+
 # Calculos
 ndvi_m = sn["media"]
 estado = "Saudavel" if ndvi_m >= 0.6 else "Moderado" if ndvi_m >= 0.4 else "Em alerta"
@@ -376,6 +409,86 @@ fig_clima.update_yaxes(title_text="Temperatura (°C)", secondary_y=True,
                        tickfont=dict(color=DS["muted"], size=11),
                        title_font=dict(color=DS["muted"], size=11))
 chart_clima = pio.to_html(fig_clima, full_html=False, config=plotly_config)
+
+# ============================================================
+# GRAFICO v3.0: Série anual de chuva (2015–2024) — detecta anos anômalos
+# ============================================================
+cores_anos = []
+for v in df_chuva_anual["precipitacao_mm"]:
+    if v == chuva_ano_seco:
+        cores_anos.append(DS["warn"])
+    elif v == chuva_ano_chuvoso:
+        cores_anos.append(DS["accent_2"])
+    else:
+        cores_anos.append(DS["ink_2"])
+
+fig_chuva_anual = go.Figure()
+fig_chuva_anual.add_trace(go.Bar(
+    x=df_chuva_anual["ano"].astype(str),
+    y=df_chuva_anual["precipitacao_mm"],
+    marker=dict(color=cores_anos, line=dict(width=0)),
+    text=[f"{v:.0f}" for v in df_chuva_anual["precipitacao_mm"]],
+    textposition="outside", textfont=dict(size=10, color=DS["muted"], family=FONT_MONO),
+    hovertemplate="<b>%{x}</b><br>Chuva: %{y:.0f} mm<extra></extra>",
+    cliponaxis=False,
+))
+fig_chuva_anual.add_hline(
+    y=chuva_media_anos, line_dash="dash", line_color=DS["muted"], opacity=0.6,
+    annotation_text=f"média {chuva_media_anos:.0f} mm",
+    annotation_position="top left",
+    annotation_font_size=10, annotation_font_color=DS["muted"],
+)
+fig_chuva_anual.update_layout(
+    **layout_base, height=300, bargap=0.4,
+    yaxis=dict(title="Chuva anual (mm)", gridcolor=DS["border"],
+               zeroline=False, tickfont=dict(color=DS["muted"], size=11),
+               title_font=dict(color=DS["muted"], size=11), showline=False),
+    xaxis=dict(gridcolor="rgba(0,0,0,0)", zeroline=False,
+               tickfont=dict(color=DS["ink"], size=12, family=FONT_MONO), showline=False),
+)
+chart_chuva_anual = pio.to_html(fig_chuva_anual, full_html=False, config=plotly_config)
+
+# ============================================================
+# GRAFICO v3.0: NDVI × chuva (cruzamento temporal, 2 eixos)
+# ============================================================
+fig_cross = make_subplots(specs=[[{"secondary_y": True}]])
+
+fig_cross.add_trace(go.Bar(
+    x=df_chuva_serie["data"], y=df_chuva_serie["precipitacao_mm"],
+    name="Chuva", marker=dict(color=DS["accent_2"], opacity=0.7, line=dict(width=0)),
+    hovertemplate="%{x|%b %Y}<br>Chuva: %{y:.0f} mm<extra></extra>",
+), secondary_y=False)
+
+fig_cross.add_trace(go.Scatter(
+    x=df_ndvi_mensal["data"], y=df_ndvi_mensal["ndvi_medio"],
+    name="NDVI", mode="lines+markers",
+    line=dict(color=DS["accent"], width=2.5, shape="spline", smoothing=0.6),
+    marker=dict(size=5, color=DS["accent"]),
+    hovertemplate="%{x|%b %Y}<br>NDVI: %{y:.3f}<extra></extra>",
+), secondary_y=True)
+
+fig_cross.update_layout(
+    height=360,
+    font=dict(family=FONT_SANS, color=DS["ink_2"], size=11),
+    paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+    margin=dict(t=20, b=50, l=60, r=60),
+    bargap=0.15,
+    legend=dict(orientation="h", y=-0.2, x=0, font=dict(size=12, color=DS["ink_2"])),
+    hovermode="x unified",
+    hoverlabel=dict(bgcolor=DS["ink"], bordercolor=DS["ink"],
+                    font=dict(family=FONT_MONO, color="#fff", size=11)),
+)
+fig_cross.update_xaxes(gridcolor="rgba(0,0,0,0)", zeroline=False,
+                       tickfont=dict(color=DS["muted"], size=11), showline=False)
+fig_cross.update_yaxes(title_text="Chuva (mm)", secondary_y=False,
+                       gridcolor=DS["border"], zeroline=False,
+                       tickfont=dict(color=DS["muted"], size=11),
+                       title_font=dict(color=DS["muted"], size=11))
+fig_cross.update_yaxes(title_text="NDVI", secondary_y=True,
+                       gridcolor="rgba(0,0,0,0)", zeroline=False, range=[0.3, 0.85],
+                       tickfont=dict(color=DS["muted"], size=11),
+                       title_font=dict(color=DS["muted"], size=11))
+chart_cross = pio.to_html(fig_cross, full_html=False, config=plotly_config)
 
 # ============================================================
 # MAPA FOLIUM
@@ -1909,6 +2022,48 @@ footer strong {{ color: var(--ink); font-family: var(--ff-sans); font-weight: 60
             </div>
 
             {'<div class="alert alert-yellow" style="margin-top:20px;"><div><strong>Risco de geada confirmado.</strong> Em ' + mes_mais_frio + ', a temperatura mínima histórica caiu para ' + f"{temp_min_geral:.1f}" + ' °C — abaixo do limiar de 5 °C. Culturas sensíveis (banana, tomate, café em mudas) precisam de proteção no inverno: quebra-ventos, plantio em face Norte, cobertura morta, irrigação pré-geada.</div></div>' if risco_geada else '<div class="alert alert-green" style="margin-top:20px;"><div><strong>Sem histórico de geada severa</strong> — a temperatura mínima raramente desce abaixo de 5 °C na média dos últimos 10 anos. Mesmo assim, culturas muito sensíveis podem sofrer em anos atípicos.</div></div>'}
+
+            <!-- v3.0: série anual de chuva -->
+            <h3 style="margin-top:48px;">Nem todo ano é igual</h3>
+            <p class="dek" style="margin-bottom:20px;">A média de {chuva_total_anual:.0f} mm esconde variação grande entre anos. Saber quais foram os <strong>anos anômalos</strong> ajuda a entender o que já aconteceu e planejar pro que pode acontecer de novo.</p>
+
+            <div class="inline-metrics" style="margin-bottom:24px;">
+                {inline_metric(f"{chuva_ano_seco:.0f} mm", f"Ano mais seco — {ano_mais_seco}", f"{(chuva_ano_seco - chuva_media_anos)/chuva_media_anos*100:+.0f}% vs média")}
+                {inline_metric(f"{chuva_ano_chuvoso:.0f} mm", f"Ano mais chuvoso — {ano_mais_chuvoso}", f"{(chuva_ano_chuvoso - chuva_media_anos)/chuva_media_anos*100:+.0f}% vs média")}
+                {inline_metric(f"{chuva_media_anos:.0f} mm", "Média 2015–2024", "Linha de referência")}
+            </div>
+
+            <div class="panel panel-pad-lg">
+                <div class="panel-head">
+                    <div class="panel-title">Chuva total por ano (2015–2024)</div>
+                    <div class="panel-meta">CHIRPS · soma anual</div>
+                </div>
+                <div class="chart">{chart_chuva_anual}</div>
+                <div class="chart-caption">
+                    Barras cinzas: anos próximos da média. <span style="color:#EAB308;font-weight:600;">Amarelo:</span> ano mais seco do período. <span style="color:#0EA5E9;font-weight:600;">Azul:</span> ano mais chuvoso. A linha tracejada marca a média de {chuva_media_anos:.0f} mm.
+                </div>
+            </div>
+
+            <!-- v3.0: cruzamento NDVI × chuva -->
+            <h3 style="margin-top:48px;">A vegetação responde à chuva — com atraso</h3>
+            <p class="dek" style="margin-bottom:20px;">Sobrepondo a série de NDVI do sítio com a chuva mensal nos últimos 3 anos, fica visível que o verde <strong>atrasa {melhor_lag if melhor_lag > 0 else 0} mês{'es' if melhor_lag > 1 else ''}</strong> em relação à chuva. Essa defasagem é importante pra planejar pastagem, irrigação e colheita.</p>
+
+            <div class="inline-metrics" style="margin-bottom:24px;">
+                {inline_metric(f"{corr_sem_lag:+.2f}", "Correlação direta", "NDVI × chuva no mesmo mês")}
+                {inline_metric(f"{melhor_corr:+.2f}", f"Melhor correlação — lag {melhor_lag}", f"NDVI responde {melhor_lag} mês{'es' if melhor_lag > 1 else ''} depois")}
+                {inline_metric(f"{len(df_cross)}", "Observações", "Meses com NDVI + chuva")}
+            </div>
+
+            <div class="panel panel-pad-lg">
+                <div class="panel-head">
+                    <div class="panel-title">NDVI do sítio × chuva mensal</div>
+                    <div class="panel-meta">2023–2026 · Sentinel-2 + CHIRPS</div>
+                </div>
+                <div class="chart">{chart_cross}</div>
+                <div class="chart-caption">
+                    As <span style="color:#0EA5E9;font-weight:600;">barras azuis</span> mostram a chuva mensal; a <span style="color:#65A30D;font-weight:600;">linha verde</span> mostra o NDVI médio do sítio. Depois de meses chuvosos, a vegetação responde com atraso — quando a chuva para em abril, o verde ainda dura algumas semanas. Na seca de ago-set, o NDVI cai antes da chuva voltar.
+                </div>
+            </div>
 
             <h3 style="margin-top:32px;">Como ler isso no contexto do sítio</h3>
             <div class="cards">
