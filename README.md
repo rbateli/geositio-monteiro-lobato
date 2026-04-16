@@ -4,9 +4,12 @@
 
 Análise completa de um sítio de **3,28 ha** na Serra da Mantiqueira (Monteiro Lobato, SP) a partir de imagens de satélite, modelos de elevação e dados climáticos públicos. Tudo consolidado em um **dashboard HTML estático** de 10 seções.
 
+[![Live demo](https://img.shields.io/badge/live%20demo-online-lime.svg)](https://rbateli.github.io/geositio-monteiro-lobato/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-lime.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![Earth Engine](https://img.shields.io/badge/Google-Earth%20Engine-green.svg)](https://earthengine.google.com/)
+
+**Demo ao vivo:** [rbateli.github.io/geositio-monteiro-lobato](https://rbateli.github.io/geositio-monteiro-lobato/)
 
 ![GeoSítio dashboard](docs/screenshot.png)
 
@@ -98,9 +101,10 @@ docs/
 
 ## Roadmap
 
+- [x] **Deploy público** — [GitHub Pages](https://rbateli.github.io/geositio-monteiro-lobato/) (rebuild manual via `bash deploy.sh`)
 - [ ] **MapBiomas** (38 anos de uso do solo) — mostra evolução do sítio
 - [ ] **CAR** (Cadastro Ambiental Rural) — confirmar reserva legal oficial
-- [ ] **Deploy público** (GitHub Pages / Cloudflare Pages)
+- [ ] **GitHub Actions** — rebuild diário automatizado pra manter os tiles do Earth Engine vivos
 
 ## Autor
 
