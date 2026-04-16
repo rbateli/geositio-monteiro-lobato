@@ -33,6 +33,8 @@ echo "==> Criando branch gh-pages orphan..."
 git worktree add --detach "$WORKTREE"
 (
   cd "$WORKTREE"
+  # Garante que não exista branch local gh-pages do deploy anterior
+  git branch -D gh-pages 2>/dev/null || true
   git checkout --orphan gh-pages
   git rm -rf . 2>/dev/null || true
   cp ../data/sitio.html ./index.html
