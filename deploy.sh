@@ -36,9 +36,10 @@ git worktree add --detach "$WORKTREE"
   git checkout --orphan gh-pages
   git rm -rf . 2>/dev/null || true
   cp ../data/sitio.html ./index.html
+  cp ../data/thumb_agua.png ./thumb_agua.png
   # .nojekyll impede o Jekyll do GitHub Pages de processar arquivos com _underscore
   touch .nojekyll
-  git add index.html .nojekyll
+  git add index.html thumb_agua.png .nojekyll
   git commit -m "deploy: sitio $(date -u +%Y-%m-%dT%H:%M:%SZ)"
   git push -f origin gh-pages
 )
