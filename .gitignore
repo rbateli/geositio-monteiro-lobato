@@ -2,13 +2,11 @@
 data/raw/
 data/processed/
 
-# Artefatos HTML gerados (14 MB+, regenerados por gerar_*.py)
+# Artefato gerado pelo build (~14 MB, regerar com `python gerar_site.py`)
 data/sitio.html
-data/relatorio_final.html
-data/relatorio_geositio.html
-data/mapa_ndvi.html
-data/mapa_relevo.html
-data/mapa_sitio.html
+
+# Capturas auxiliares
+data/screenshot_*.png
 
 *.tif
 *.tiff

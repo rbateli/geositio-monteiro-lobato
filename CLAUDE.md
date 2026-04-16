@@ -71,25 +71,22 @@ src/
 notebooks/             # Exploração módulo a módulo (não usados no build final)
 design-system/
   MASTER.md            # Design system documentation (source of truth for visual)
-dashboard/app.py       # Streamlit (obsoleto, não usar)
+docs/
+  screenshot.png       # Captura usada no README
 data/
   Sítio Monteiro Lobato.kml    # Polígono do sítio
   ndvi_serie_temporal.csv      # Série temporal extraída
   thumb_agua.png               # Imagem estática curada (usado na seção Água)
   sitio.html                   # Artefato gerado (gitignored, 14 MB)
-  *.png                        # Gráficos exportados dos notebooks
+LICENSE                # MIT
+README.md              # Apresentação do projeto (com screenshot)
 ```
-
-## Scripts auxiliares (menos ativos)
-
-- `gerar_mapa.py`, `gerar_mapa_zonas.py` — mapas isolados Folium
-- `gerar_relatorio.py`, `gerar_relatorio_final.py` — versões antigas do relatório (pré-v1.0)
 
 ## Conventions
 
 - **Código, comentários e texto em português (pt-BR)**, exceto quando referencia API de biblioteca.
 - Notebooks prefixados por número: `01_...`, `02_...`, `03_...`.
-- **Dados pesados não são commitados.** `.gitignore` cobre: rasters (.tif, .nc), shapefiles grandes, artefatos HTML (`data/sitio.html`, `relatorio_*.html`, `mapa_*.html`).
+- **Dados pesados não são commitados.** `.gitignore` cobre: rasters (.tif, .nc), shapefiles grandes, artefato `data/sitio.html` e capturas auxiliares `data/screenshot_*.png`.
 - **CRS:** EPSG:4326 (WGS84) para exibição; EPSG:31983 (SIRGAS 2000 / UTM 23S) para análise métrica.
 - **Paletas de cor** são controladas por tokens CSS em `:root` no `<style>` do `gerar_site.py`. As paletas do Earth Engine (em `ee_utils.py`) devem casar.
 
